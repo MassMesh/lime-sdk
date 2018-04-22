@@ -1,3 +1,7 @@
+## Meshbox
+# src-git meshbox file:///home/builder/lime-sdk/meshbox.git
+src-git meshbox https://github.com/MassMesh/meshbox.git;for-17.02+terrier
+
 src-git base https://github.com/lede-project/source.git;v17.01.4
 src-git packages https://git.lede-project.org/feed/packages.git;lede-17.01
 src-git luci https://git.lede-project.org/project/luci.git;lede-17.01
