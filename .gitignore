@@ -5,6 +5,5 @@ feeds
 feeds.conf
 output
 files
-*.local
 communities/
 lede/
