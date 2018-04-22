@@ -12,13 +12,14 @@ RESULT=0
 J=${J:-$make_j}
 
 usage() {
-    echo "Usage: $0 [-f [--force]] [-d <target> [--sdk|ib|force]] [-i <target> [--sdk-file=<file>|ib-file=<file>]] 
-                [--download-all|build-all|update-feeds] [--targets|flavors|communities|update-communities|profiles=<target>] 
+    echo "Usage: $0 [-f [--force]] [-d <target> [--sdk|ib|force]] [-i <target> [--sdk-file=<file>|ib-file=<file>]]
+                [--download-all|build-all|update-feeds] [--targets|flavors|communities|update-communities|profiles=<target>]
                 [-b <target> [-j<N>] [--no-update|no-link-ib|remote|clean|force-local|package=<pkg>]]
-                [-c <target> [--profile=<profile>|no-update|remote|flavor=<flavor>|community=<path>|extra-pkg=<list>]] 
+                [-c <target> [--profile=<profile>|no-update|remote|flavor=<flavor>|community=<path>|extra-pkg=<list>]]
                 [--help]"
     echo ""
     echo "    --help                     : show full help with examples"
+    echo "    --massmesh                 : initialize massmesh-tech"
     echo "    --download-all             : download all SDK and ImageBuilders"
     echo "    --build-all	               : build SDK for all available tagets"
     echo "    --cook-all	               : cook firmwares for all available targets and profiles"
@@ -331,6 +332,22 @@ build_all_sdk() {
     for t in $(cat $targets_list); do build_sdk $t; done
 }
 
+massmesh() {
+    echo "[massmesh-tech] - initializing system hook"
+
+    for x in *.local
+        do [ ${x} ] && [ -e ${x} ] && md5sum ${x} || err=1
+    done
+
+    if [ x${err} == x1 ]; then
+        echo "[massmesh-tech] - error: missing files"
+        exit
+    else
+        echo "[massmesh-tech] - init: complete"
+    fi
+}
+
+
 download_all() {
     cat $targets_list | while read t; do download_sdk $t; download_ib $t; done
 }
@@ -446,11 +463,15 @@ join_packages() {
 [ -z "$1" ] && usage
 OPTS=$(getopt -o hd:fb:c:d:i:j: -l targets,build-all,download-all,profiles:,flavors,profile:,flavor:,\
 update-feeds,no-update,no-link-ib,only-sdk,only-ib,remote,ib,sdk,sdk-file:,ib-file:,help,force,clean,\
-communities,update-communities,community:,cook-all,package:,extra-pkg:,force-local -n $0 -- "$@")
+communities,update-communities,community:,cook-all,package:,extra-pkg:,massmesh,force-local -n $0 -- "$@")
 eval set -- "$OPTS"
 
 while true; do
     case $1 in
+        --massmesh)
+            massmesh $2
+            break
+        ;;
         --help)
             usage
             examples
