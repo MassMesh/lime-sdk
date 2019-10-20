@@ -354,7 +354,7 @@ download_feeds() {
 }
 
 download_communities() {
-    [ ! -d "$communities_dir" ] && {
+    [ ! -d "$communities_dir/.git" ] && {
         echo "-> Downloading communities repository"
         git clone $communities_git $communities_dir || {
             echo "-> Cannot fetch communities repository"
@@ -364,7 +364,7 @@ download_communities() {
 }
 
 update_communities() {
-    [ ! -d "$communities_dir" ] && download_communities || {
+    [ ! -d "$communities_dir/.git" ] && download_communities || {
         (cd $communities_dir && git pull) || {
             echo "-> Cannot update communities repository"
             exit 1

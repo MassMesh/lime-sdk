@@ -1,0 +1,17 @@
+-smonit
+alfred
+cjdns
+lime-app
+lime-proto-anygw
+lime-proto-batadv
+luci-app-batman-adv
+luci-app-cjdns
+nano
+-wpad-basic
+dnscrypt-proxy
+dnscrypt-proxy-resolvers
+kmod-ipt-nat6
+luci-app-dnscrypt-proxy
+mini_snmpd
+nodogsplash
+socat
