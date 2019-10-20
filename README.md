@@ -1,9 +1,14 @@
 # lime-sdk cooker
-LibreMesh **software development kit** uses the [OpenWrt](https://openwrt.org/docs/start) SDK and ImageBuilder to generate (**cook**) LibreMesh packages and firmware. If you want to create your own LibreMesh flavor because you need some specific configuration or you just want to have control over your binaries, the cooker is your friend!
+LibreMesh **software development kit** uses the [OpenWRT](https://openwrt.org) SDK and ImageBuilder to generate (**cook**) LibreMesh packages and firmware. If you want to create your own LibreMesh flavor because you need some specific configuration or you just want to have control over your binaries, the cooker is your friend!
 
-Basic usage example for cooking a firmware for TpLink 4300:
+Basic usage example for cooking a libremesh using bmx7 routing protocol firmware for device Alix Board 2d2 using remote repositories (no compilation required). Recommended for most people:
 
-`./cooker -c ar71xx/generic --flavor=lime_default --profile=tl-wdr4300-v1`
+`./cooker -c x86/geode --profile=Generic --flavor=lime_bmx7 --community=libremesh/only-bmx7 --remote`
+
+Basic usage example for cooking a firmware for TpLink 4300 compiling localy the libremesh packages:
+
+`./cooker -c ar71xx/generic --flavor=lime_bmx7 --profile=tl-wdr4300-v1 --community=libremesh/only-bmx7`
+
 
 ## Using cooker online with Chef
 
@@ -43,7 +48,7 @@ For instance, this will work for a TpLink WDR4300:
 `./cooker -c ar71xx/generic --profile=tl-wdr4300-v1 --flavor=lime_default`
 
 ##### Target 
-Target references to the router architecture, usually depends on the manufactor and the set of chips used for building the hardware. Therefore, you must know the target and subtarget before using cooker. As we use OpenWrt, this information can be found here https://openwrt.org/toh/start. The most common targets are currently _ar71xx/generic_ (Atheros) and _ramips/mt7620_ (Ramips). Once we know the target, we must find the specific profile.
+Target references to the router architecture, usually depends on the manufactor and the set of chips used for building the hardware. Therefore, you must know the target and subtarget before using cooker. As we use OpenWRT, this information can be found here https://wiki.openwrt.org/toh/start. The most common targets are currently _ar71xx/generic_ (Atheros) and _ramips/mt7620_ (Ramips). Once we know the target, we must find the specific profile.
 
 To see the list of available targets execute:
 
@@ -91,14 +96,12 @@ Cooker can locally build the LibreMesh packages or fetch the remote precompiled 
 `./cooker -c ar71xx/generic --profile=tl-wdr4300-v1 --flavor=lime_default --remote`
 
 #### Using custom SDK and/or IB files
-Custom local SDK and IB files can be used (instead of fetching official OpenWrt sources). Must be specified before building or cooking ("-b" or "-c").
+Custom local SDK and IB files can be used (instead of fetching official OpenWRT sources). Must be specified before building or cooking ("-b" or "-c").
 
-```
-./cooker -f
-./cooker -i ar71xx/generic --ib-file=myOwnImageBuilder.tar.xz --sdk-file=myOwnSDK.tar.xz
-./cooker -b ar71xx/generic --force-local
-./cooker -c ar71xx/generic --profile=tl-wdr4300-v1 --flavor=lime_default --force-local
-```
+`./cooker -f`
+`./cooker -i ar71xx/generic --ib-file=myOwnImageBuilder.tar.xz --sdk-file=myOwnSDK.tar.xz`
+`./cooker -b ar71xx/generic --force-local`
+`./cooker -c ar71xx/generic --profile=tl-wdr4300-v1 --flavor=lime_default --force-local`
 
 Do not forget to use _force-local_ option to use your own SDK target packages (kernel signature will be different from remote sources).
 
@@ -122,7 +125,7 @@ A community profile might include a special file named PACKAGES on the root of t
 
 ## Using development branch
 
-If you want to get the last OpenWrt source because it includes some new feature or it supports some new hardware, you can use the lime-sdk branch named _develop_. However as OpenWrt source is changing daily, we cannot assure the correct working of the firmware.
+If you want to get the last OpenWRT source because it includes some new feature or it supports some new hardware, you can use the lime-sdk branch named _develop_. However as OpenWRT source is changing daily, we cannot assure the correct working of the firmware.
 It is recommended to start with a new Git clone instead of reuse an existing one. Once the lime-sdk source is cloned, change the branch: `git checkout develop`
 
 ## Add your own feed repository
@@ -268,7 +271,7 @@ Time to time, if you want to update the code with the official one you might add
 
 While developing new features, or just testing out fixes, being able to see them in action without having to reflash a device can be useful. To
 achieve this you can spin a [QEMU](https://en.wikipedia.org/wiki/QEMU) virtual machine and boot the image with your edits.
-These instruction are based on [OpenWrt documentation](https://openwrt.org/docs/guide-user/virtualization/start) but are a bit more specific to LibreMesh building process.
+These instruction are based on [LEDE documentation](https://lede-project.org/docs/guide-developer/test-virtual-image-using-armvirt) but are a bit more specific to LibreMesh building process.
 
 First of all you need to create your cooked version of LibreMesh firmware for the `armvirt` target, see [up here](#preparing-the-local-environment).
 
@@ -278,10 +281,10 @@ First of all you need to create your cooked version of LibreMesh firmware for th
 Once `cooker` finishes to build the image you'll find the needed files in the `output` folder of `lime-sdk`, they will be located in a subfolder
 accordingly to the architecture and profile chosen. The interesting files are:
 
- * lede-17.01.2-lime-XXXX-zImage
- * lede-17.01.2-lime-XXXX-root.ext4.gz
+ * openwrt-lime-XXXX-zImage
+ * openwrt-lime-XXXX-root.ext4.gz
 
-Uncompress `lede-17.01.2-lime-XXXX-root.ext4.gz` using `gunzip -k lede-17.01.2-lime-XXXX-root.ext4.gz`
+Uncompress `openwrt-lime-XXXX-root.ext4.gz` using `gunzip -k openwrt-lime-XXXX-root.ext4.gz`
 
 Now you need to install qemu in order to boot the image, usually it's available inside the repositories of the distribution. Here some quick links
 documenting how to install it on [Debian](https://wiki.debian.org/QEMU) or [ArchLinux](https://wiki.archlinux.org/index.php/QEMU).
@@ -295,7 +298,7 @@ Now it's time to spin the virtual machine.
 ### Using plain QEMU
 Plain qemu can be launched straight from the command line, if you don't need to access LibreMesh web interface and just want to have a shell you can issue
 
-`qemu-system-arm -nographic -M virt -m 64 -kernel lede-17.01.2-lime-XXXX-armvirt-zImage -drive file=lede-17.01.2-lime-XXXX-armvirt-root.ext4,format=raw,if=virtio -append 'root=/dev/vda rootwait'`
+`qemu-system-arm -nographic -M virt -m 64 -kernel openwrt-lime-XXXX-armvirt-zImage -drive file=openwrt-lime-XXXX-armvirt-root.ext4,format=raw,if=virtio -append 'root=/dev/vda rootwait'`
 
 Press enter and you will find yourself inside the VM booted.
 
@@ -322,7 +325,7 @@ libvirt socket.
 
 Now you have to create a new virtual machine: click on *File/New Virtual Machine*, select *Import existing disk image* and choose the *arm* architecture under *Architecture options* and *virt* machine type.
 
-Taking arm as an example you'll have to choose (clicking *Browse* and *Browse Local* buttons) the `lede-17.01.2-lime-XXXX-armvirt-root.ext4` file as storage disk and the `lede-17.01.2-lime-XXXX-armvirt-zImage` file as Kernel path. Insert `root=/dev/vda rootwait` as Kernel args. You can leave *OS type* as *Generic*.
+Taking arm as an example you'll have to choose (clicking *Browse* and *Browse Local* buttons) the `openwrt-lime-XXXX-armvirt-root.ext4` file as storage disk and the `openwrt-lime-XXXX-armvirt-zImage` file as Kernel path. Insert `root=/dev/vda rootwait` as Kernel args. You can leave *OS type* as *Generic*.
 
 Assign resources (64 MB of RAM memory should be enough) and, under *Network selection*, choose `NAT` as network type. In this way you will be able to connect to the web interface and the device will have internet access.
 

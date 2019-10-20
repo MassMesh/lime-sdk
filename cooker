@@ -12,23 +12,22 @@ RESULT=0
 J=${J:-$make_j}
 
 usage() {
-    echo "Usage: $0 [-f [--force]] [-d <target> [--sdk|ib|force]] [-i <target> [--sdk-file=<file>|ib-file=<file>]]
-                [--download-all|build-all|update-feeds] [--targets|flavors|communities|update-communities|profiles=<target>]
+    echo "Usage: $0 [-f [--force]] [-d <target> [--sdk|ib|force]] [-i <target> [--sdk-file=<file>|ib-file=<file>]] 
+                [--download-all|build-all|no-update-feeds] [--targets|flavors|communities|update-communities|profiles=<target>]
                 [-b <target> [-j<N>] [--no-update|no-link-ib|remote|clean|force-local|package=<pkg>]]
-                [-c <target> [--profile=<profile>|no-update|remote|flavor=<flavor>|community=<path>|extra-pkg=<list>]]
+                [-c <target> [--profile=<profile>|no-update|remote|flavor=<flavor>|community=<path>|extra-pkg=<list>]] 
                 [--help]"
     echo ""
     echo "    --help                     : show full help with examples"
-    echo "    --massmesh                 : initialize massmesh-tech"
     echo "    --download-all             : download all SDK and ImageBuilders"
-    echo "    --build-all	               : build SDK for all available tagets"
-    echo "    --cook-all	               : cook firmwares for all available targets and profiles"
+    echo "    --build-all                : build SDK for all available tagets"
+    echo "    --cook-all                 : cook firmwares for all available targets and profiles"
     echo "    --targets                  : list all officialy supported targets"
     echo "    --profiles=<target>        : list available hardware profiles for a specific target"
     echo "    --flavors                  : list available LibreMesh flavors for cooking"
     echo "    --communities              : list available community profiles"
     echo "    --update-communities       : update or download community profiles"
-    echo "    --update-feeds             : update previously downloaded feeds (only works for Git feeds)"
+    echo "    --no-update-feeds          : don't update previously downloaded feeds (only works for Git feeds)"
     echo "    -f                         : download feeds based on feeds.conf.default file. Feeds will be shared among all targets"
     echo "       --force                 : force reinstall of feeds (remove old if exist)"
     echo "    -d <target>                : download SDK and ImageBuilder for specific target"
@@ -101,6 +100,8 @@ cook() {
         download_ib $target
     }
 
+    [ "$snapshots" -eq 1 ] && check_outdated "$target" "imagebuilder"
+
     [ -n "$use_remote_pkgs" ] && {
         local arch=`get_arch_from_ib $target`
         echo "-> Using remote repository for ImageBuilder, architecture: $arch"
@@ -145,13 +146,18 @@ cook() {
       EXTRA_IMAGE_NAME="$fw_extra_name" \
       BIN_DIR="$output_dir" \
       `ls $ib_files_dir/* 1>/dev/null 2>&1 && echo "FILES=$ib_files_dir"` \
-      $force_no_update $files_remove
+      $force_no_update $files_remove | tee last-build.log
     ERROR=$?
     if (($ERROR != 0)); then
       echo -e "\n-> Firmware not cooked, something wrong happened on the ImageBuilder compilation process"
       ERROR_PROFILES="$ERROR_PROFILES $target/$profile/$flavor"
     else
-      echo -e "\n-> Firmware for target $target, profile $profile and flavor $flavor cooked!\nFind the binaries in $output_dir directory"
+        if cat last-build.log | grep "images are too big"; then
+            echo -e "\n-> Firmware is too big for device. Please try again with less packages or a mini flavor"
+            ERROR=1
+        else
+            echo -e "\n-> Firmware for target $target, profile $profile and flavor $flavor cooked!\nFind the binaries in $output_dir directory"
+        fi
     fi
     return $ERROR
 }
@@ -186,12 +192,22 @@ build_sdk() {
     local target="$1"
     local sdk="$release/$target/sdk"
     local ib="$release/$target/ib"
+    local sdk_arch="$(get_arch $target sdk)"
+
+    for build_arch in $build_archs; do
+        [[ "$sdk_arch" == "$build_arch" ]] && {
+            echo "-> Arch $build_arch was build in this cycle - skipping"
+            return
+        }
+    done
 
     [ ! -d "$sdk" ] && {
         echo "-> SDK for target $target not found"
-        download_sdk $target
+        download_sdk "$target"
     }
-    
+
+    [ "$snapshots" -eq 1 ] && check_outdated "$target" "sdk"
+
     echo "-> Building $sdk"
     
     [ -f "$feeds_file" ] || { 
@@ -201,24 +217,41 @@ build_sdk() {
     cp -f "$feeds_file" "$sdk/feeds.conf"
     [ -z "$no_update" ] && (cd $sdk && scripts/feeds update -a) || (cd $sdk && scripts/feeds update -i)
 
-    [ -n "$sdk_clean" ] && clean_sdk $target
+    [ -n "$sdk_clean" ] && clean_sdk "$target"
 
     for r in $sdk_install_repos; do
-        (cd $sdk && scripts/feeds install -p $r -a)
+        (cd "$sdk" && scripts/feeds install -p "$r" -a)
     done
-    for p in $sdk_install_packages; do
-        (cd $sdk && scripts/feeds install $p)
+    for p in $sdk_compile_packages; do
+        (cd $sdk && scripts/feeds install "$p")
     done
 
     [ -n "$package" ] && {
-        build_pkg $sdk $package
+        build_pkg "$sdk" "$package"
         return
     }
 
     cp ${sdk_config}.local $sdk/.config 2>/dev/null || cp ${sdk_config} $sdk/.config
+
+    if [[ "$sign_packages" == "1" ]]; then
+        [ ! -f keys/key-build ] || [ ! -f keys/key-build.pub ] && {
+            echo "-> Signing keys not available. For signing packages you must create and copy them into keys/ directory."
+            echo "-> File names must be keys/key-build (private) and keys/key-build.pub (public)"
+            exit 1
+        }
+        cp -f ./keys/key-build* "$sdk/"
+        echo "CONFIG_SIGNED_PACKAGES=y" >> "$sdk/.config"
+    else
+        echo "CONFIG_SIGNED_PACKAGES=n" >> "$sdk/.config"
+    fi
+
+    for p in $sdk_compile_packages; do
+        echo "CONFIG_PACKAGE_$p=m" >> "$sdk/.config"
+    done
+
     make -C $sdk defconfig
     make -j$J -C $sdk V=$V && [ -z "$no_link_ib" ] && {
-        [ -f "$ib/repositories.original.conf" ] || download_ib $target
+        [ -f "$ib/repositories.original.conf" ] || download_ib "$target"
         cat $ib/repositories.original.conf > $tmp_dir/repositories.sdk.conf
         echo "-> Linking IB with SDK"
         [ -n "$force_local" ] && echo "-> Force all local packages is on"
@@ -227,9 +260,7 @@ build_sdk() {
         for r in $PWD/$sdk/bin/packages/*/*; do
           [ -z "$force_local" ] && {
             case $r in
-            # we build the master branch of the routing feed, hence
-            # don't include it in the filter
-            *base | *luci | *packages | *telephony)
+            *base | *luci | *packages | *telephony | *routing)
                continue
               ;;
             esac
@@ -246,6 +277,21 @@ build_sdk() {
         cp -f $tmp_dir/repositories.sdk.conf $ib/repositories.sdk.conf
         echo "-> Using custom $tmp_dir/repositories.sdk.conf"
     } || echo "-> Error compiling SDK"
+
+    [[ ! -z "$repository_dir" ]] && {
+        [ ! -d "$repository_dir" ] && mkdir -p "$repository_dir"
+        for repo in $sdk_install_repos; do
+            local repo_path="$PWD/$sdk/bin/packages/$sdk_arch/$repo"
+            if [[ -d "$repo_path"  ]]; then
+                [ ! -d "$repository_dir/$sdk_arch" ] && mkdir -p "$repository_dir/$sdk_arch"
+                echo "-> Creating symlink for $sdk_arch/$repo"
+                ln -sf "$repo_path" "$repository_dir/$sdk_arch/" 2>/dev/null
+            else
+                echo "-> Couldn't find repo $repo"
+            fi
+        done
+    }
+    [ "$build_archs" != "" ] && build_archs+=" $sdk_arch" || build_archs="$sdk_arch"
 }
 
 build_pkg() {
@@ -278,21 +324,31 @@ download_feeds() {
     echo "-> Downloading feeds into $feeds_dir/"
     set -e
     while read feed; do
-        echo "$feed" | grep -q ^src-git || continue
-        name="$(echo $feed | awk '{print $2}')"
-        full_url="$(echo $feed | awk '{print $3}')"
-        [ -d $feeds_dir/$name ] && rm -rf $feeds_dir/$name
-        if echo "$full_url" | grep \;; then
-            url="$(echo $full_url | awk -F\; '{print $1}')"
-            branch="$(echo $full_url | awk -F\; '{print $2}')"
-            git clone $url -b $branch $feeds_dir/$name
-        elif echo "$full_url" | grep \^; then
-            url="$(echo $full_url | awk -F\^ '{print $1}')"
-            commit="$(echo $full_url | awk -F\^ '{print $2}')"
-            git clone $url $feeds_dir/$name
-            ( cd $feeds_dir/$name && git checkout $commit )
-        fi
-        echo "src-link $name $PWD/$feeds_dir/$name" | tee -a $feeds_file
+        local feed_type="${feed%% *}"
+        case $feed_type in
+            src-git)
+                name="$(echo $feed | awk '{print $2}')"
+                full_url="$(echo $feed | awk '{print $3}')"
+                [ -d $feeds_dir/$name ] && rm -rf $feeds_dir/$name
+                if echo "$full_url" | grep \;; then
+                    url="$(echo $full_url | awk -F\; '{print $1}')"
+                    branch="$(echo $full_url | awk -F\; '{print $2}')"
+                    git clone $url -b $branch $feeds_dir/$name
+                elif echo "$full_url" | grep \^; then
+                    url="$(echo $full_url | awk -F\^ '{print $1}')"
+                    commit="$(echo $full_url | awk -F\^ '{print $2}')"
+                    git clone $url $feeds_dir/$name
+                    ( cd $feeds_dir/$name && git checkout $commit )
+                fi
+                echo "src-link $name $PWD/$feeds_dir/$name" | tee -a $feeds_file
+                ;;
+            src-link|src-cpy)
+                echo "$feed" | tee -a $feeds_file
+                ;;
+            *)
+                continue
+                ;;
+        esac
     done < $feeds_template
     set +e
 }
@@ -329,27 +385,36 @@ update_feeds() {
 }
 
 build_all_sdk() {
+    build_archs=""
     for t in $(cat $targets_list); do build_sdk $t; done
 }
 
-massmesh() {
-    echo "[massmesh-tech] - initializing system hook"
-
-    for x in *.local
-        do [ ${x} ] && [ -e ${x} ] && md5sum ${x} || err=1
-    done
-
-    if [ x${err} == x1 ]; then
-        echo "[massmesh-tech] - error: missing files"
-        exit
-    else
-        echo "[massmesh-tech] - init: complete"
-    fi
-}
-
-
 download_all() {
     cat $targets_list | while read t; do download_sdk $t; download_ib $t; done
+}
+
+check_outdated() {
+    echo "-> Check if snapshot is outdated"
+    local target="$1"
+    local type="$2"
+    local url="$base_url/$target"
+    local output="$release/$target"
+    local file_hash="$(get_hash_filename $url $type)"
+    local file="$(echo $file_hash | cut -d'*' -f 2)"
+
+    [ "$file_hash" != "$(cat $tmp_dir/${file}_checksum)" ] && {
+        echo "-> Snapshot $type is outdated"
+        echo "--> Removing and downloading again"
+        rm "$tmp_dir/$file"*
+        [ "$type" == "sdk" ] && download_sdk "$target"
+        [ "$type" == "imagebuilder" ] && download_ib "$target"
+    }
+}
+
+get_hash_filename() {
+    local url="$1"
+    local type="$2"
+    echo "$(wget -q -O- $url/sha256sums | grep ${brand_name}-$type)"
 }
 
 download_sdk() {
@@ -363,12 +428,17 @@ download_sdk() {
     local output="$release/$target"
     [ ! -d "$output" ] && mkdir -p "$output"
     
-    local sdk_file="$(wget -q -O- $url | grep ${brand_name}-sdk | grep href | awk -F\> '{print $4}' | awk -F\< '{print $1}')"
+    local sdk_file_hash="$(get_hash_filename $url sdk)"
+    local sdk_file="$(echo $sdk_file_hash | cut -d'*' -f 2)"
+
     echo "-> Downloading $url/$sdk_file"
     wget -c "$url/$sdk_file" -O "$tmp_dir/$sdk_file" || {
         echo "-> Error, cannot download SDK $url/$sdk_file"
         exit 1
     }
+
+    echo "$sdk_file_hash" > "$tmp_dir/${sdk_file}_checksum"
+
     unpack_sdk $tmp_dir/$sdk_file $output
 }
 
@@ -403,12 +473,17 @@ download_ib() {
     local url="$base_url/$target"
     local output="$release/$target"
     [ ! -d "$output" ] && mkdir -p "$output"
-    local ib_file="$(wget -q -O- $url | grep ${brand_name}-imagebuilder | grep href | awk -F\> '{print $4}' | awk -F\< '{print $1}')"
+
+    local ib_file_hash="$(get_hash_filename $url imagebuilder)"
+    local ib_file="$(echo $ib_file_hash | cut -d'*' -f 2)"
     echo "-> Downloading $url/$ib_file"
     wget -c "$url/$ib_file" -O "$tmp_dir/$ib_file" || {
         echo "-> Error, cannot download ImageBuilder $url/$ib_file"
         exit 1
     }
+
+    echo "$ib_file_hash" > "$tmp_dir/${ib_file}_checksum"
+
     unpack_ib $tmp_dir/$ib_file $output
 }
 
@@ -424,7 +499,7 @@ unpack_ib() {
            [ -d $output/ib ] && rm -rf $output/ib
            mv $output/${brand_name}-imagebuilder* $output/ib
            cp -f $output/ib/repositories.conf $output/ib/repositories.original.conf
-           sed -i 's%^src/gz .*_routing .*$%# &%' $output/ib/repositories.original.conf
+           #sed -i 's%^src/gz .*_routing .*$%# &%' $output/ib/repositories.original.conf
        } || echo "-> Error installing ImageBuilder"
     }
 }
@@ -446,6 +521,14 @@ get_arch_from_ib() {
     grep CONFIG_TARGET_ARCH_PACKAGES $release/$target/ib/.config | cut -d= -f2 | tr -d \"
 }
 
+get_arch() {
+    local target="$1"
+    local from="$2"
+    [[ -z "$from" ]] && from=ib
+    [ ! -d "$release/$target/$from" ] && "download_$from" "$target"
+    grep CONFIG_TARGET_ARCH_PACKAGES "$release/$target/$from/.config" | cut -d= -f2 | tr -d \"
+}
+
 list_profiles() {
     local target="$1"
     [ ! -d $release/$target/ib ] && download_ib $target
@@ -462,16 +545,12 @@ join_packages() {
 
 [ -z "$1" ] && usage
 OPTS=$(getopt -o hd:fb:c:d:i:j: -l targets,build-all,download-all,profiles:,flavors,profile:,flavor:,\
-update-feeds,no-update,no-link-ib,only-sdk,only-ib,remote,ib,sdk,sdk-file:,ib-file:,help,force,clean,\
-communities,update-communities,community:,cook-all,package:,extra-pkg:,massmesh,force-local -n $0 -- "$@")
+no-update-feeds,no-update,no-link-ib,only-sdk,only-ib,remote,ib,sdk,sdk-file:,ib-file:,help,force,clean,\
+communities,update-communities,community:,cook-all,package:,extra-pkg:,force-local -n $0 -- "$@")
 eval set -- "$OPTS"
 
 while true; do
     case $1 in
-        --massmesh)
-            massmesh $2
-            break
-        ;;
         --help)
             usage
             examples
@@ -505,11 +584,12 @@ while true; do
             list_communities
             break
         ;;
-        --update-feeds)
-            update_feeds
+        --no-update-feeds)
+            no_update_feeds=1
             shift
         ;;
         --no-update)
+            ./snippets/patch_ib_no_update.sh
             no_update=1
             shift
         ;;
@@ -643,6 +723,10 @@ profile=${profile:-Default}
     download_feeds
 }
 
+[ -n "$no_update_feeds" ] && {
+    update_feeds
+}
+
 [ "$update_communities" == "1" ] && update_communities
 
 [ "$build_sdk" == "1" ] && build_sdk $target
@@ -652,12 +736,8 @@ profile=${profile:-Default}
         echo "-> If community is defined you must also specify its profile: --community=name/profile"
         exit 1
     } || [ -n "$community" ] && {
-        if [[ ${communities_dir:0:1} != "/" ]]; then
-            community_files="$PWD/$communities_dir/$community/$community_profile"
-        else
-            community_files="$communities_dir/$community/$community_profile"
-        fi
         download_communities
+        community_files="$PWD/$communities_dir/$community/$community_profile"
         [ ! -d "$community_files" ] && {
             echo "-> The community and profile specified does not exist ($community_files)"
             exit 1
